@@ -11,7 +11,19 @@ import asyncio
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+# Inicializar Supabase con manejo de errores
+supabase: Client = None
+try:
+        if SUPABASE_URL and SUPABASE_KEY:
+                    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+                    print(f"Supabase initialized successfully")
+        else:
+                    print(f"ERROR: Missing Supabase environment variables")
+                    print(f"SUPABASE_URL: {SUPABASE_URL}")
+                    print(f"SUPABASE_KEY: {SUPABASE_KEY}")
+except Exception as e:
+        print(f"ERROR initializing Supabase: {str(e)}")
+        print(f"This app will run but without database connectivity")
 
 app = FastAPI(title="Asistencia Algorithmics API")
 
