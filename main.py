@@ -11,9 +11,7 @@ import asyncio
 # TODO: Supabase temporarily disabled to get server running
 supabase = None
 SUPABASE_URL = None
-SUPABASE_KEY = Nonen as e:
-        print(f"ERROR initializing Supabase: {str(e)}")
-        print(f"This app will run but without database connectivity")
+SUPABASE_KEY = None
 
 app = FastAPI(title="Asistencia Algorithmics API")
 
