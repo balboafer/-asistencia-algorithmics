@@ -99,16 +99,14 @@ def send_whatsapp(to_number: str, message: str):
 
 def send_email(to_email: str, subject: str, body: str):
     try:
-        msg = MIMEMultipart()
-        msg["From"] = SMTP_USER
-        msg["To"] = to_email
-        msg["Subject"] = subject
-        msg.attach(MIMEText(body, "plain"))
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=10) as server:
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.sendmail(SMTP_USER, to_email, msg.as_string())
-        print(f"Email sent to {to_email}")
+        RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+        with httpx.Client(timeout=15) as client:
+            resp = client.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+                json={"from": "Algorithmics <onboarding@resend.dev>", "to": [to_email], "subject": subject, "text": body}
+            )
+        print(f"Email sent: {resp.status_code} {resp.text[:100]}")
     except Exception as e:
         print(f"Email error: {e}")
 
@@ -222,7 +220,7 @@ def registrar_asistencia(a: Asistencia, background_tasks: BackgroundTasks):
             "fecha": fecha,
         }, on_conflict="alumno_id,fecha").execute()
 
-        # Notify if absent ÃÂ¢ÃÂÃÂ run in background so response is immediate
+        # Notify if absent ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ run in background so response is immediate
         if not a.presente:
             alumno_resp = supabase.table("alumnos").select(
                 "nombre, telefono_padre, email_padre, telegram_chat_id"
