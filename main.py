@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client, Client
 from pydantic import BaseModel
@@ -7,6 +7,7 @@ from datetime import date, timedelta
 import os
 import smtplib
 import httpx
+import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -35,14 +36,9 @@ SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 
 # ---------- Models ----------
 
-class Grupo(BaseModel):
-    nombre: str
-    hora_inicio: str
-    hora_fin: str
-
 class Alumno(BaseModel):
     nombre: str
-    edad: Optional[int] = None
+    edad: int
     grupo_id: int
     telefono_padre: Optional[str] = None
     email_padre: Optional[str] = None
@@ -56,53 +52,55 @@ class AlumnoUpdate(BaseModel):
     email_padre: Optional[str] = None
     telegram_chat_id: Optional[str] = None
 
+class Grupo(Basemodel):
+    nombre: str
+    horario: Optional[str] = None
+
 class Asistencia(BaseModel):
     alumno_id: int
     presente: bool
-    fecha: str
+    fecha: Optional[str] = None
 
 
-# ---------- Notification helpers ----------
+# ---------- Notification functions ----------
 
 def send_telegram(chat_id: str, message: str):
-    if not TELEGRAM_BOT_TOKEN or not chat_id:
-        return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        httpx.post(url, json={"chat_id": chat_id, "text": message}, timeout=5)
+        with httpx.Client(timeout=10) as client:
+            resp = client.post(url, json={"chat_id": chat_id, "text": message})
+        print(f"Telegram sent: {resp.status_code}")
     except Exception as e:
         print(f"Telegram error: {e}")
 
 def send_whatsapp(to_number: str, message: str):
-    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_WHATSAPP_FROM or not to_number:
-        return
     try:
         url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
-        httpx.post(
-            url,
-            auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
-            data={
-                "From": f"whatsapp:{TWILIO_WHATSAPP_FROM}",
-                "To": f"whatsapp:{to_number}",
-                "Body": message,
-            },
-            timeout=5,
-        )
+        with httpx.Client(timeout=10) as client:
+            resp = client.post(
+                url,
+                auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
+                data={
+                    "From": f"whatsapp:{TWILIO_WHATSAPP_FROM}",
+                    "To": f"whatsapp:{to_number}",
+                    "Body": message,
+                }
+            )
+        print(f"WhatsApp sent: {resp.status_code} {resp.text[:200]}")
     except Exception as e:
         print(f"WhatsApp error: {e}")
 
 def send_email(to_email: str, subject: str, body: str):
-    if not SMTP_USER or not SMTP_PASSWORD or not to_email:
-        return
     try:
         msg = MIMEMultipart()
         msg["From"] = SMTP_USER
         msg["To"] = to_email
         msg["Subject"] = subject
         msg.attach(MIMEText(body, "plain"))
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as server:
             server.login(SMTP_USER, SMTP_PASSWORD)
             server.sendmail(SMTP_USER, to_email, msg.as_string())
+        print(f"Email sent to {to_email}")
     except Exception as e:
         print(f"Email error: {e}")
 
@@ -115,12 +113,16 @@ def notify_ausencia(alumno: dict, fecha: str):
     email = alumno.get("email_padre")
     telegram = alumno.get("telegram_chat_id")
 
+    print(f"Notifying ausencia for {nombre}: tel={telefono}, email={email}, tg={telegram}")
+
     if telefono:
         send_whatsapp(telefono, mensaje)
     if email:
         send_email(email, subject, mensaje)
     if telegram:
         send_telegram(telegram, mensaje)
+
+    print(f"Notifications done for {nombre}")
 
 
 # ---------- Endpoints ----------
@@ -129,40 +131,19 @@ def notify_ausencia(alumno: dict, fecha: str):
 def root():
     return {"status": "ok", "service": "Algorithmics Asistencia API"}
 
-@app.get("/health")
-def health():
-    return {"status": "healthy"}
-
-# Grupos
-@app.post("/grupos")
-def crear_grupo(g: Grupo):
-    try:
-        resp = supabase.table("grupos").insert({
-            "nombre": g.nombre,
-            "hora_inicio": g.hora_inicio,
-            "hora_fin": g.hora_fin
-        }).execute()
-        return resp.data[0]
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
 @app.get("/grupos")
-def listar_grupos():
+def get_grupos():
     try:
         resp = supabase.table("grupos").select("*").order("nombre").execute()
         return resp.data
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.get("/grupos/{grupo_id}")
-def obtener_grupo(grupo_id: int):
+@app.post("/grupos")
+def crear_grupo(g: Grupo):
     try:
-        resp = supabase.table("grupos").select("*").eq("id", grupo_id).execute()
-        if not resp.data:
-            raise HTTPException(status_code=404, detail="Grupo no encontrado")
+        resp = supabase.table("grupos").insert({"nombre": g.nombre, "horario": g.horario}).execute()
         return resp.data[0]
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -174,7 +155,14 @@ def eliminar_grupo(grupo_id: int):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-# Alumnos
+@app.get("/alumnos")
+def get_alumnos():
+    try:
+        resp = supabase.table("alumnos").select("*").order("nombre").execute()
+        return resp.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @app.post("/alumnos")
 def crear_alumno(a: Alumno):
     try:
@@ -187,14 +175,6 @@ def crear_alumno(a: Alumno):
             "telegram_chat_id": a.telegram_chat_id,
         }).execute()
         return resp.data[0]
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.get("/alumnos")
-def listar_alumnos():
-    try:
-        resp = supabase.table("alumnos").select("*").order("nombre").execute()
-        return resp.data
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -225,105 +205,59 @@ def actualizar_alumno(alumno_id: int, a: AlumnoUpdate):
 
 # Asistencia
 @app.post("/asistencia")
-def registrar_asistencia(a: Asistencia):
+def registrar_asistencia(a: Asistencia, background_tasks: BackgroundTasks):
     try:
+        fecha = a.fecha or str(date.today())
         resp = supabase.table("asistencia").upsert({
             "alumno_id": a.alumno_id,
             "presente": a.presente,
-            "fecha": a.fecha,
+            "fecha": fecha,
         }, on_conflict="alumno_id,fecha").execute()
 
-        # Notify if absent
+        # Notify if absent — run in background so response is immediate
         if not a.presente:
             alumno_resp = supabase.table("alumnos").select(
                 "nombre, telefono_padre, email_padre, telegram_chat_id"
             ).eq("id", a.alumno_id).execute()
             if alumno_resp.data:
-                notify_ausencia(alumno_resp.data[0], a.fecha)
+                alumno = alumno_resp.data[0]
+                background_tasks.add_task(notify_ausencia, alumno, fecha)
 
-        return resp.data[0]
+        return resp.data[0] if resp.data else {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.get("/asistencia/grupo/{grupo_id}/fecha/{fecha}")
-def asistencia_grupo_fecha(grupo_id: int, fecha: str):
+@app.get("/asistencia")
+def get_asistencia(grupo_id: Optional[int] = None, fecha: Optional[str] = None):
     try:
-        alumnos_resp = supabase.table("alumnos").select("id").eq("grupo_id", grupo_id).execute()
-        ids = [a["id"] for a in alumnos_resp.data]
-        if not ids:
-            return []
-        resp = supabase.table("asistencia").select("*").in_("alumno_id", ids).eq("fecha", fecha).execute()
+        query = supabase.table("asistencia").select(
+            "*, alumnos(nombre, grupo_id, grupos(nombre))"
+        )
+        if fecha:
+            query = query.eq("fecha", fecha)
+        if grupo_id:
+            query = query.eq("alumnos.grupo_id", grupo_id)
+        resp = query.order("fecha", desc=True).execute()
         return resp.data
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.get("/ausentes/grupo/{grupo_id}/fecha/{fecha}")
-def ausentes_grupo_fecha(grupo_id: int, fecha: str):
+@app.get("/asistencia/alumno/{alumno_id}")
+def historial_alumno(alumno_id: int):
     try:
-        alumnos_resp = supabase.table("alumnos").select("id, nombre").eq("grupo_id", grupo_id).execute()
-        ids = [a["id"] for a in alumnos_resp.data]
-        if not ids:
-            return []
-        asist_resp = supabase.table("asistencia").select("alumno_id").in_("alumno_id", ids).eq("fecha", fecha).eq("presente", False).execute()
-        ausentes_ids = {r["alumno_id"] for r in asist_resp.data}
-        return [a for a in alumnos_resp.data if a["id"] in ausentes_ids]
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.get("/historial/{alumno_id}")
-def historial_alumno(alumno_id: int, dias: int = 30):
-    try:
-        fecha_limite = (date.today() - timedelta(days=dias)).isoformat()
-        resp = supabase.table("asistencia").select("*").eq("alumno_id", alumno_id).gte("fecha", fecha_limite).order("fecha", desc=True).execute()
+        resp = supabase.table("asistencia").select("*").eq("alumno_id", alumno_id).order("fecha", desc=True).execute()
         return resp.data
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.get("/asistencia/historial/grupo/{grupo_id}")
-def historial_grupo(grupo_id: int, dias: int = 30):
+@app.get("/asistencia/resumen")
+def resumen_asistencia(grupo_id: Optional[int] = None, dias: int = 30):
     try:
-        fecha_limite = (date.today() - timedelta(days=dias)).isoformat()
-        alumnos_resp = supabase.table("alumnos").select("id, nombre").eq("grupo_id", grupo_id).execute()
-        alumnos = {a["id"]: a["nombre"] for a in alumnos_resp.data}
-        if not alumnos:
-            return []
-        asist_resp = supabase.table("asistencia").select(
-            "alumno_id, presente, fecha"
-        ).in_("alumno_id", list(alumnos.keys())).gte("fecha", fecha_limite).order("fecha", desc=True).execute()
-        by_date = {}
-        for r in asist_resp.data:
-            d = r["fecha"]
-            if d not in by_date:
-                by_date[d] = {"presentes": [], "ausentes": []}
-            nombre = alumnos.get(r["alumno_id"], "?")
-            if r["presente"]:
-                by_date[d]["presentes"].append(nombre)
-            else:
-                by_date[d]["ausentes"].append(nombre)
-        result = [{"fecha": k, **v} for k, v in sorted(by_date.items(), reverse=True)]
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.post("/alertas/ausentes")
-def alertar_ausentes(data: dict):
-    try:
-        grupo_id = data.get("grupo_id")
-        fecha = data.get("fecha")
-        if not grupo_id or not fecha:
-            raise HTTPException(status_code=400, detail="grupo_id y fecha requeridos")
-        alumnos_resp = supabase.table("alumnos").select(
-            "id, nombre, telefono_padre, email_padre, telegram_chat_id"
-        ).eq("grupo_id", grupo_id).execute()
-        alumnos = {a["id"]: a for a in alumnos_resp.data}
-        asist_resp = supabase.table("asistencia").select("alumno_id, presente").in_(
-            "alumno_id", list(alumnos.keys())
-        ).eq("fecha", fecha).execute()
-        for r in asist_resp.data:
-            if not r["presente"]:
-                notify_ausencia(alumnos[r["alumno_id"]], fecha)
-        return {"ok": True}
-    except HTTPException:
-        raise
+        desde = str(date.today() - timedelta(days=dias))
+        query = supabase.table("asistencia").select(
+            "*, alumnos(nombre, grupo_id)"
+        ).gte("fecha", desde)
+        resp = query.execute()
+        return resp.data
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
