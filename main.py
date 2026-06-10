@@ -7,7 +7,7 @@ import os
 from typing import List, Optional
 import asyncio
 
-# ConfiguraciÃÂ³n
+# ConfiguraciÃÂÃÂ³n
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
@@ -77,7 +77,7 @@ def listar_grupos():
 
 @app.get("/grupos/{grupo_id}")
 def obtener_grupo(grupo_id: int):
-    """Obtener un grupo especÃÂ­fico"""
+    """Obtener un grupo especÃÂÃÂ­fico"""
     try:
         response = supabase.table("grupos").select("*").eq("id", grupo_id).execute()
         if not response.data:
@@ -156,7 +156,7 @@ def marcar_asistencia(asistencia: MarcarAsistencia):
 
 @app.get("/asistencia/grupo/{grupo_id}/fecha/{fecha}")
 def obtener_asistencia_grupo_fecha(grupo_id: int, fecha: str):
-    """Obtener asistencia de un grupo en una fecha especÃÂ­fica (YYYY-MM-DD)"""
+    """Obtener asistencia de un grupo en una fecha especÃÂÃÂ­fica (YYYY-MM-DD)"""
     try:
         # Obtener alumnos del grupo
         alumnos_response = supabase.table("alumnos").select("id, nombre").eq(
@@ -218,7 +218,7 @@ def obtener_ausentes(grupo_id: int, fecha: str):
 
 @app.get("/historial/{alumno_id}")
 def historial_asistencia(alumno_id: int, dias: int = 30):
-    """Obtener historial de asistencia de un alumno (ÃÂºltimos N dÃÂ­as)"""
+    """Obtener historial de asistencia de un alumno (ÃÂÃÂºltimos N dÃÂÃÂ­as)"""
     try:
         fecha_limite = (date.today() - timedelta(days=dias)).isoformat()
         response = supabase.table("asistencia").select(
@@ -239,7 +239,7 @@ def historial_asistencia(alumno_id: int, dias: int = 30):
 def generar_alerta_ausentes(alerta: AlertaAusentes, background_tasks: BackgroundTasks):
     """
     Generar alerta de ausentes para un grupo en una fecha.
-    AquÃÂ­ irÃÂ¡ la integraciÃÂ³n con Twilio/WhatsApp luego.
+    AquÃÂÃÂ­ irÃÂÃÂ¡ la integraciÃÂÃÂ³n con Twilio/WhatsApp luego.
     """
     try:
         ausentes_data = obtener_ausentes(alerta.grupo_id, alerta.fecha)
@@ -269,7 +269,7 @@ def eliminar_alumno(alumno_id: int):
 
 @app.put("/alumnos/{alumno_id}")
 def actualizar_alumno(alumno_id: int, alumno: Alumno):
-    """Actualizar datos de un alumno (nombre, edad, grupo, teléfono)"""
+    """Actualizar datos de un alumno (nombre, edad, grupo, telÃ©fono)"""
     try:
         response = supabase.table("alumnos").update({
             "nombre": alumno.nombre,
@@ -283,7 +283,7 @@ def actualizar_alumno(alumno_id: int, alumno: Alumno):
 
 @app.delete("/grupos/{grupo_id}")
 def eliminar_grupo(grupo_id: int):
-    """Eliminar un grupo (y sus alumnos en cascada si está configurado en Supabase)"""
+    """Eliminar un grupo (y sus alumnos en cascada si estÃ¡ configurado en Supabase)"""
     try:
         response = supabase.table("grupos").delete().eq("id", grupo_id).execute()
         return {"ok": True}
@@ -291,6 +291,35 @@ def eliminar_grupo(grupo_id: int):
         raise HTTPException(status_code=400, detail=str(e))
 
 # Health check para Railway
+
+
+@app.get("/asistencia/historial/grupo/{grupo_id}")
+def historial_grupo(grupo_id: int, dias: int = 30):
+    """Historial de asistencia de un grupo (ultimos N dias)"""
+    try:
+        fecha_limite = (date.today() - timedelta(days=dias)).isoformat()
+        alumnos_resp = supabase.table("alumnos").select("id, nombre").eq("grupo_id", grupo_id).execute()
+        alumnos = {a["id"]: a["nombre"] for a in alumnos_resp.data}
+        if not alumnos:
+            return []
+        asist_resp = supabase.table("asistencia").select(
+            "alumno_id, presente, fecha"
+        ).in_("alumno_id", list(alumnos.keys())).gte("fecha", fecha_limite).order("fecha", desc=True).execute()
+        by_date = {}
+        for r in asist_resp.data:
+            d = r["fecha"]
+            if d not in by_date:
+                by_date[d] = {"presentes": [], "ausentes": []}
+            nombre = alumnos.get(r["alumno_id"], "?")
+            if r["presente"]:
+                by_date[d]["presentes"].append(nombre)
+            else:
+                by_date[d]["ausentes"].append(nombre)
+        result = [{"fecha": k, **v} for k, v in sorted(by_date.items(), reverse=True)]
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @app.get("/health")
 def health_check():
     return {
