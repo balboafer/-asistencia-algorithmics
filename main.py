@@ -52,7 +52,7 @@ class AlumnoUpdate(BaseModel):
     email_padre: Optional[str] = None
     telegram_chat_id: Optional[str] = None
 
-class Grupo(Basemodel):
+class Grupo(BaseModel):
     nombre: str
     horario: Optional[str] = None
 
