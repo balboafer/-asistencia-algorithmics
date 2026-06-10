@@ -7,11 +7,10 @@ import os
 from typing import List, Optional
 import asyncio
 
-# Configuración
-# TODO: Supabase temporarily disabled to get server running
-supabase = None
-SUPABASE_URL = None
-SUPABASE_KEY = None
+# ConfiguraciÃ³n
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
 
 app = FastAPI(title="Asistencia Algorithmics API")
 
@@ -78,7 +77,7 @@ def listar_grupos():
 
 @app.get("/grupos/{grupo_id}")
 def obtener_grupo(grupo_id: int):
-    """Obtener un grupo específico"""
+    """Obtener un grupo especÃ­fico"""
     try:
         response = supabase.table("grupos").select("*").eq("id", grupo_id).execute()
         if not response.data:
@@ -157,7 +156,7 @@ def marcar_asistencia(asistencia: MarcarAsistencia):
 
 @app.get("/asistencia/grupo/{grupo_id}/fecha/{fecha}")
 def obtener_asistencia_grupo_fecha(grupo_id: int, fecha: str):
-    """Obtener asistencia de un grupo en una fecha específica (YYYY-MM-DD)"""
+    """Obtener asistencia de un grupo en una fecha especÃ­fica (YYYY-MM-DD)"""
     try:
         # Obtener alumnos del grupo
         alumnos_response = supabase.table("alumnos").select("id, nombre").eq(
@@ -219,7 +218,7 @@ def obtener_ausentes(grupo_id: int, fecha: str):
 
 @app.get("/historial/{alumno_id}")
 def historial_asistencia(alumno_id: int, dias: int = 30):
-    """Obtener historial de asistencia de un alumno (últimos N días)"""
+    """Obtener historial de asistencia de un alumno (Ãºltimos N dÃ­as)"""
     try:
         fecha_limite = (date.today() - timedelta(days=dias)).isoformat()
         response = supabase.table("asistencia").select(
@@ -240,7 +239,7 @@ def historial_asistencia(alumno_id: int, dias: int = 30):
 def generar_alerta_ausentes(alerta: AlertaAusentes, background_tasks: BackgroundTasks):
     """
     Generar alerta de ausentes para un grupo en una fecha.
-    Aquí irá la integración con Twilio/WhatsApp luego.
+    AquÃ­ irÃ¡ la integraciÃ³n con Twilio/WhatsApp luego.
     """
     try:
         ausentes_data = obtener_ausentes(alerta.grupo_id, alerta.fecha)
