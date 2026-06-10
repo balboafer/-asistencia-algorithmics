@@ -214,7 +214,7 @@ def registrar_asistencia(a: Asistencia, background_tasks: BackgroundTasks):
             "fecha": fecha,
         }, on_conflict="alumno_id,fecha").execute()
 
-        # Notify if absent â run in background so response is immediate
+        # Notify if absent Ã¢ÂÂ run in background so response is immediate
         if not a.presente:
             alumno_resp = supabase.table("alumnos").select(
                 "nombre, telefono_padre, email_padre, telegram_chat_id"
@@ -263,6 +263,7 @@ def resumen_asistencia(grupo_id: Optional[int] = None, dias: int = 30):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+
 @app.get("/test-notify")
 def test_notify():
     results = {}
@@ -290,6 +291,14 @@ def test_notify():
         results["email"] = "OK"
     except Exception as e:
         results["email"] = f"ERROR: {e}"
+    # Sandbox keyword lookup
+    try:
+        sandbox_url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/SandBoxes/WhatsApp.json"
+        with httpx.Client(timeout=10) as client:
+            resp = client.get(sandbox_url, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
+        results["sandbox"] = resp.text[:500]
+    except Exception as e:
+        results["sandbox"] = f"ERROR: {e}"
     # Env check
     results["sid_len"] = len(TWILIO_ACCOUNT_SID)
     results["token_len"] = len(TWILIO_AUTH_TOKEN)
