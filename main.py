@@ -214,7 +214,7 @@ def registrar_asistencia(a: Asistencia, background_tasks: BackgroundTasks):
             "fecha": fecha,
         }, on_conflict="alumno_id,fecha").execute()
 
-        # Notify if absent — run in background so response is immediate
+        # Notify if absent â run in background so response is immediate
         if not a.presente:
             alumno_resp = supabase.table("alumnos").select(
                 "nombre, telefono_padre, email_padre, telegram_chat_id"
@@ -261,3 +261,39 @@ def resumen_asistencia(grupo_id: Optional[int] = None, dias: int = 30):
         return resp.data
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/test-notify")
+def test_notify():
+    results = {}
+    # WhatsApp test
+    try:
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
+        with httpx.Client(timeout=15) as client:
+            resp = client.post(url, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
+                data={"From": f"whatsapp:{TWILIO_WHATSAPP_FROM}",
+                      "To": "whatsapp:+525546559905",
+                      "Body": "TEST Algorithmics notificacion"})
+        results["whatsapp"] = f"{resp.status_code}: {resp.text[:400]}"
+    except Exception as e:
+        results["whatsapp"] = f"ERROR: {e}"
+    # Email test
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = SMTP_USER
+        msg["To"] = "balboaf@gmail.com"
+        msg["Subject"] = "TEST Algorithmics"
+        msg.attach(MIMEText("Prueba de notificacion del sistema de asistencias", "plain"))
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as server:
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_USER, "balboaf@gmail.com", msg.as_string())
+        results["email"] = "OK"
+    except Exception as e:
+        results["email"] = f"ERROR: {e}"
+    # Env check
+    results["sid_len"] = len(TWILIO_ACCOUNT_SID)
+    results["token_len"] = len(TWILIO_AUTH_TOKEN)
+    results["smtp_user"] = SMTP_USER
+    results["smtp_pass_len"] = len(SMTP_PASSWORD)
+    results["from_number"] = TWILIO_WHATSAPP_FROM
+    return results
